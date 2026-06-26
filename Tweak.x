@@ -23,6 +23,14 @@ static CGPoint MKLoadOffset(void) {
     return CGPointMake([d doubleForKey:kKeyX], [d doubleForKey:kKeyY]);
 }
 
+static void MKLog(NSString *fmt, ...) {
+    va_list ap; va_start(ap, fmt);
+    NSString *s = [[NSString alloc] initWithFormat:fmt arguments:ap];
+    va_end(ap);
+    FILE *f = fopen("/tmp/dockmover.log", "a");
+    if (f) { fprintf(f, "%s\n", s.UTF8String); fclose(f); }
+}
+
 static void MKSaveOffset(CGPoint p) {
     NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
     [d setDouble:p.x forKey:kKeyX];
@@ -57,7 +65,8 @@ static void MKSaveOffset(CGPoint p) {
 - (void)mk_applyOffset {
     CGPoint o = [self mk_offset];
     self.transform = CGAffineTransformMakeTranslation(o.x, o.y);
-    NSLog(@"[DockMover] applyOffset dx=%.1f dy=%.1f frame=%@", o.x, o.y, NSStringFromCGRect(self.frame));
+    MKLog(@"[DockMover] applyOffset dx=%.1f dy=%.1f frame=%@ tx=%.1f ty=%.1f",
+          o.x, o.y, NSStringFromCGRect(self.frame), self.transform.tx, self.transform.ty);
 }
 
 %new
@@ -116,7 +125,7 @@ static void MKSaveOffset(CGPoint p) {
     if (self.window) {
         [self mk_installGestures];
         [self mk_applyOffset];
-        NSLog(@"[DockMover] gestures installed on SBDockView %p", self);
+        MKLog(@"[DockMover] gestures installed on SBDockView %p", self);
     }
 }
 
