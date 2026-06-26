@@ -145,7 +145,16 @@ static UIView *MKContainerOf(UIView *v) {
     CGPoint o = MKLiveOffset(self);
     platter.frame = CGRectOffset(platter.frame, o.x, o.y);
 #ifdef DOCKMOVER_VERIFY
+    NSMutableString *chain = [NSMutableString string];
+    UIView *v = platter; int depth = 0;
+    while (v && depth < 12) {
+        [chain appendFormat:@"%d:%@ frame=%@ clip=%d ui=%d\n",
+            depth, NSStringFromClass([v class]), NSStringFromCGRect(v.frame),
+            v.clipsToBounds, v.userInteractionEnabled];
+        v = v.superview; depth++;
+    }
     NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
+    [d setObject:chain forKey:@"chain"];
     [d setObject:NSStringFromCGRect([platter convertRect:platter.bounds toView:nil]) forKey:@"platterWin"];
     [d synchronize];
 #endif

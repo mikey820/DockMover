@@ -6,7 +6,7 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = DockMover
 
 DockMover_FILES = Tweak.x
-DockMover_CFLAGS = -fobjc-arc
+DockMover_CFLAGS = -fobjc-arc -DDOCKMOVER_VERIFY
 DockMover_FRAMEWORKS = UIKit
 
 include $(THEOS)/makefiles/tweak.mk
