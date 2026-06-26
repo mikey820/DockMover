@@ -30,6 +30,13 @@ static void MKSaveOffset(CGPoint p) {
     [d synchronize];
 }
 
+@interface SBDockView : UIView
+- (CGPoint)mk_offset;
+- (void)mk_setOffset:(CGPoint)o;
+- (void)mk_applyOffset;
+- (void)mk_installGestures;
+@end
+
 %hook SBDockView
 
 %new
