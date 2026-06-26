@@ -1,6 +1,6 @@
 Package: com.mikey820.dockmover
 Name: DockMover
-Version: 1.0.0
+Version: 1.0.1
 Architecture: iphoneos-arm
 Description: Move the iPad dock anywhere on screen with a two-finger drag.
 Maintainer: mikey820

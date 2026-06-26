@@ -9,6 +9,10 @@
 // always offset from the freshly-computed base, the offset is stable and never
 // compounds.
 //
+// Gestures live on the platter itself (the visible dock) so they travel with
+// it — otherwise, once the dock is moved away from the bottom strip, a second
+// drag would land on the now-empty container and do nothing.
+//
 // Gestures (on the dock):
 //   • two-finger drag        -> move the dock anywhere on screen (persists)
 //   • two-finger triple-tap  -> reset to default position
@@ -58,6 +62,14 @@ static UIView *MKFindPlatter(UIView *root) {
     return nil;
 }
 
+// The container (SBFloatingDockView) is the stable, full-width view that drives
+// the platter's layout and our offset. Find it by walking up from the platter.
+static UIView *MKContainerOf(UIView *v) {
+    Class C = NSClassFromString(@"SBFloatingDockView");
+    while (v && C && ![v isKindOfClass:C]) v = v.superview;
+    return v;
+}
+
 #pragma mark - shared gesture handler (singleton target)
 
 @interface MKDockMover : NSObject
@@ -72,10 +84,10 @@ static UIView *MKFindPlatter(UIView *root) {
     return s;
 }
 - (void)handlePan:(UIPanGestureRecognizer *)g {
-    UIView *container = g.view;
+    UIView *container = MKContainerOf(g.view); // g.view is the platter
     if (!container) return;
     static CGPoint base;
-    CGPoint t = [g translationInView:container];
+    CGPoint t = [g translationInView:container]; // container is stable, doesn't move
     if (g.state == UIGestureRecognizerStateBegan) {
         base = MKLoadOffset();
         UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
@@ -88,13 +100,13 @@ static UIView *MKFindPlatter(UIView *root) {
         if (g.state == UIGestureRecognizerStateEnded ||
             g.state == UIGestureRecognizerStateCancelled ||
             g.state == UIGestureRecognizerStateFailed) {
-            // persist the clamped value that layout actually settled on
             MKSaveOffset(MKLiveOffset(container));
         }
     }
 }
 - (void)handleReset:(UITapGestureRecognizer *)g {
-    UIView *container = g.view;
+    UIView *container = MKContainerOf(g.view);
+    if (!container) return;
     MKSetLiveOffset(container, CGPointZero);
     MKSaveOffset(CGPointZero);
     [UIView animateWithDuration:0.25 animations:^{
@@ -125,15 +137,11 @@ static UIView *MKFindPlatter(UIView *root) {
 
 %hook SBFloatingDockView
 
-- (void)didMoveToWindow {
-    %orig;
-    if (self.window) [[MKDockMover shared] install:self];
-}
-
 - (void)layoutSubviews {
     %orig; // re-centers the platter at its base position
     UIView *platter = MKFindPlatter(self);
     if (!platter) return;
+    [[MKDockMover shared] install:platter]; // gestures travel with the visible dock
     CGPoint o = MKLiveOffset(self);
     platter.frame = CGRectOffset(platter.frame, o.x, o.y);
 #ifdef DOCKMOVER_VERIFY
