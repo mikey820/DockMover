@@ -23,12 +23,15 @@ static CGPoint MKLoadOffset(void) {
     return CGPointMake([d doubleForKey:kKeyX], [d doubleForKey:kKeyY]);
 }
 
-static void MKLog(NSString *fmt, ...) {
-    va_list ap; va_start(ap, fmt);
-    NSString *s = [[NSString alloc] initWithFormat:fmt arguments:ap];
-    va_end(ap);
-    FILE *f = fopen("/tmp/dockmover.log", "a");
-    if (f) { fprintf(f, "%s\n", s.UTF8String); fclose(f); }
+static void MKMark(NSString *key, id value) {
+    NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
+    [d setObject:value forKey:key];
+    [d synchronize];
+}
+static void MKBump(NSString *key) {
+    NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
+    [d setInteger:[d integerForKey:key] + 1 forKey:key];
+    [d synchronize];
 }
 
 static void MKSaveOffset(CGPoint p) {
@@ -65,8 +68,9 @@ static void MKSaveOffset(CGPoint p) {
 - (void)mk_applyOffset {
     CGPoint o = [self mk_offset];
     self.transform = CGAffineTransformMakeTranslation(o.x, o.y);
-    MKLog(@"[DockMover] applyOffset dx=%.1f dy=%.1f frame=%@ tx=%.1f ty=%.1f",
-          o.x, o.y, NSStringFromCGRect(self.frame), self.transform.tx, self.transform.ty);
+    MKBump(@"applyCount");
+    MKMark(@"lastFrame", NSStringFromCGRect(self.frame));
+    MKMark(@"lastApplied", NSStringFromCGPoint(o));
 }
 
 %new
@@ -125,7 +129,7 @@ static void MKSaveOffset(CGPoint p) {
     if (self.window) {
         [self mk_installGestures];
         [self mk_applyOffset];
-        MKLog(@"[DockMover] gestures installed on SBDockView %p", self);
+        MKBump(@"gestureInstallCount");
     }
 }
 
@@ -135,3 +139,11 @@ static void MKSaveOffset(CGPoint p) {
 }
 
 %end
+
+%ctor {
+    // Fires whenever this dylib is injected into a process (SpringBoard here).
+    // Distinguishes "injected" from "SBDockView hook matched".
+    MKBump(@"loadCount");
+    MKMark(@"loadedClassExists",
+           NSStringFromClass(NSClassFromString(@"SBDockView")) ?: @"MISSING");
+}
