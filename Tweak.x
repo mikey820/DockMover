@@ -57,6 +57,7 @@ static void MKSaveOffset(CGPoint p) {
 - (void)mk_applyOffset {
     CGPoint o = [self mk_offset];
     self.transform = CGAffineTransformMakeTranslation(o.x, o.y);
+    NSLog(@"[DockMover] applyOffset dx=%.1f dy=%.1f frame=%@", o.x, o.y, NSStringFromCGRect(self.frame));
 }
 
 %new
@@ -115,6 +116,7 @@ static void MKSaveOffset(CGPoint p) {
     if (self.window) {
         [self mk_installGestures];
         [self mk_applyOffset];
+        NSLog(@"[DockMover] gestures installed on SBDockView %p", self);
     }
 }
 
