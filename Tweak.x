@@ -145,6 +145,7 @@ static UIView *MKContainerOf(UIView *v) {
     CGPoint o = MKLiveOffset(self);
     platter.frame = CGRectOffset(platter.frame, o.x, o.y);
 #ifdef DOCKMOVER_VERIFY
+    if (platter.bounds.size.width < 100) return; // skip transient zero-size passes
     NSMutableString *chain = [NSMutableString string];
     UIView *v = platter; int depth = 0;
     while (v && depth < 12) {
