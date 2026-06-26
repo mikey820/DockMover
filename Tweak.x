@@ -58,26 +58,6 @@ static UIView *MKFindPlatter(UIView *root) {
     return nil;
 }
 
-// Clamp the offset so the platter keeps at least this much on screen.
-static CGPoint MKClampOffset(UIView *container, UIView *platter, CGPoint o) {
-    UIWindow *win = container.window;
-    if (!win) return o;
-    // Called before the offset is applied, so this is the un-offset base rect.
-    CGRect base = [platter convertRect:platter.bounds toView:win];
-    CGRect screen = win.bounds;
-    const CGFloat margin = 60.0; // keep at least this many points visible
-    CGFloat baseX = base.origin.x;
-    CGFloat baseY = base.origin.y;
-    CGFloat w = base.size.width, h = base.size.height;
-    CGFloat minX = margin - (baseX + w);            // platter right edge >= margin
-    CGFloat maxX = (screen.size.width - margin) - baseX; // platter left edge <= screenW - margin
-    CGFloat minY = margin - (baseY + h);
-    CGFloat maxY = (screen.size.height - margin) - baseY;
-    o.x = MAX(minX, MIN(maxX, o.x));
-    o.y = MAX(minY, MIN(maxY, o.y));
-    return o;
-}
-
 #pragma mark - shared gesture handler (singleton target)
 
 @interface MKDockMover : NSObject
@@ -154,8 +134,7 @@ static CGPoint MKClampOffset(UIView *container, UIView *platter, CGPoint o) {
     %orig; // re-centers the platter at its base position
     UIView *platter = MKFindPlatter(self);
     if (!platter) return;
-    CGPoint o = MKClampOffset(self, platter, MKLiveOffset(self));
-    MKSetLiveOffset(self, o); // remember the clamped value
+    CGPoint o = MKLiveOffset(self);
     platter.frame = CGRectOffset(platter.frame, o.x, o.y);
 #ifdef DOCKMOVER_VERIFY
     NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
