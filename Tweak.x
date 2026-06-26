@@ -119,6 +119,13 @@ static void MKApply(UIView *v) {
 
 #pragma mark - the movable dock: SBFloatingDockView (iPad)
 
+@interface SBFloatingDockView : UIView
+@end
+@interface SBFloatingDockPlatterView : UIView
+@end
+@interface SBDockView : UIView
+@end
+
 %hook SBFloatingDockView
 - (void)didMoveToWindow {
     %orig;
