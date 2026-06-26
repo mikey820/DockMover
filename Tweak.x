@@ -16,7 +16,6 @@
 #import <objc/runtime.h>
 
 static char kInstalledKey;  // gestures already installed on this view
-static char kDragDeltaKey;  // NSValue(CGPoint) live drag delta (transform only)
 
 static NSString *const kSuite = @"com.mikey820.dockmover";
 static NSString *const kKeyX  = @"offX";
