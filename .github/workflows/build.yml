@@ -1,0 +1,39 @@
+name: Build DockMover (rootful)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      THEOS: ${{ github.workspace }}/theos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: brew install ldid dpkg make
+
+      - name: Clone theos
+        run: git clone --quiet --recursive https://github.com/theos/theos.git "$THEOS"
+
+      - name: Fetch iOS SDKs
+        run: |
+          curl -sL https://github.com/theos/sdks/archive/refs/heads/master.tar.gz | \
+            tar -xzf - --strip=1 -C "$THEOS/sdks"
+          ls "$THEOS/sdks"
+
+      - name: Build package (rootful)
+        run: |
+          export PATH="/opt/homebrew/opt/make/libexec/gnubin:$PATH"
+          make package FINALPACKAGE=1
+          ls -la packages
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: DockMover-deb
+          path: packages/*.deb
