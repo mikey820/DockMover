@@ -137,6 +137,25 @@ static UIView *MKContainerOf(UIView *v) {
 
 %hook SBFloatingDockView
 
+// The container is only as tall as the bottom dock strip. Once the platter is
+// moved out of that strip, the container's default -pointInside: rejects the
+// touch and the moved dock becomes untouchable. When the dock is moved, route
+// hit-testing to the platter wherever it now is.
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *platter = MKFindPlatter(self);
+    if (platter) {
+        CGPoint o = MKLiveOffset(self);
+        if (o.x != 0.0 || o.y != 0.0) {
+            CGPoint p = [self convertPoint:point toView:platter];
+            if ([platter pointInside:p withEvent:event]) {
+                UIView *hit = [platter hitTest:p withEvent:event];
+                if (hit) return hit;
+            }
+        }
+    }
+    return %orig;
+}
+
 - (void)layoutSubviews {
     %orig; // re-centers the platter at its base position
     UIView *platter = MKFindPlatter(self);
@@ -146,16 +165,16 @@ static UIView *MKContainerOf(UIView *v) {
     platter.frame = CGRectOffset(platter.frame, o.x, o.y);
 #ifdef DOCKMOVER_VERIFY
     if (platter.bounds.size.width < 100) return; // skip transient zero-size passes
-    NSMutableString *chain = [NSMutableString string];
-    UIView *v = platter; int depth = 0;
-    while (v && depth < 12) {
-        [chain appendFormat:@"%d:%@ frame=%@ clip=%d ui=%d\n",
-            depth, NSStringFromClass([v class]), NSStringFromCGRect(v.frame),
-            v.clipsToBounds, v.userInteractionEnabled];
-        v = v.superview; depth++;
-    }
     NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
-    [d setObject:chain forKey:@"chain"];
+    // Probe the full hit-test chain as a real touch would: what view resolves
+    // at the moved platter's centre?
+    if ((o.x != 0.0 || o.y != 0.0) && self.window) {
+        CGRect win = [platter convertRect:platter.bounds toView:nil];
+        CGPoint c = CGPointMake(CGRectGetMidX(win), CGRectGetMidY(win));
+        UIView *hit = [self.window hitTest:c withEvent:nil];
+        [d setObject:(hit ? NSStringFromClass([hit class]) : @"nil") forKey:@"hitProbe"];
+        [d setObject:NSStringFromCGPoint(c) forKey:@"probePoint"];
+    }
     [d setObject:NSStringFromCGRect([platter convertRect:platter.bounds toView:nil]) forKey:@"platterWin"];
     [d synchronize];
 #endif
