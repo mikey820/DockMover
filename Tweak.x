@@ -1,12 +1,15 @@
 // DockMover — move the iPad dock around
-// Target: rootful iOS 14 iPad SpringBoard. The visible iPad dock is the
-// floating dock (SBFloatingDockView). Its position is driven by SpringBoard's
-// own layout, which stomps any transform we set — so instead we hook
-// -setCenter: and bake our saved offset into the system's own positioning.
-// That is self-correcting: every time SpringBoard repositions the dock it
-// lands at base + offset.
+// Target: rootful iOS 14 iPad SpringBoard.
 //
-// Gestures (on the dock):
+// The visible iPad dock is the rounded "platter" (SBFloatingDockPlatterView),
+// centered inside a full-width container (SBFloatingDockView). SpringBoard
+// re-centers the platter on every layout pass and stomps any transform we set,
+// so we re-apply our saved offset to the platter at the END of the container's
+// -layoutSubviews (after %orig has placed it at its base position). Because we
+// always offset from the freshly-computed base, the offset is stable and never
+// compounds.
+//
+// Gestures (on the dock container):
 //   • two-finger drag        -> move the dock anywhere on screen (persists)
 //   • two-finger triple-tap  -> reset to default position
 //
@@ -39,6 +42,17 @@ static void MKMark(NSString *key, id value) {
     [d synchronize];
 }
 
+static UIView *MKFindPlatter(UIView *root) {
+    Class P = NSClassFromString(@"SBFloatingDockPlatterView");
+    if (!P) return nil;
+    for (UIView *sub in root.subviews) {
+        if ([sub isKindOfClass:P]) return sub;
+        UIView *found = MKFindPlatter(sub);
+        if (found) return found;
+    }
+    return nil;
+}
+
 #pragma mark - shared gesture handler (singleton target)
 
 @interface MKDockMover : NSObject
@@ -53,29 +67,30 @@ static void MKMark(NSString *key, id value) {
     return s;
 }
 - (void)handlePan:(UIPanGestureRecognizer *)g {
-    UIView *v = g.view;
-    if (!v) return;
+    UIView *container = g.view;
+    if (!container) return;
+    UIView *platter = MKFindPlatter(container) ?: container;
     CGPoint base = MKLoadOffset();
-    CGPoint t = [g translationInView:v.superview];
+    CGPoint t = [g translationInView:container];
     if (g.state == UIGestureRecognizerStateBegan) {
         UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
         [fb prepare]; [fb impactOccurred];
     } else if (g.state == UIGestureRecognizerStateChanged) {
-        // live feedback via transform (cheap, no relayout thrash)
-        v.transform = CGAffineTransformMakeTranslation(t.x, t.y);
+        platter.transform = CGAffineTransformMakeTranslation(base.x + t.x, base.y + t.y); // live feedback
     } else if (g.state == UIGestureRecognizerStateEnded ||
                g.state == UIGestureRecognizerStateCancelled ||
                g.state == UIGestureRecognizerStateFailed) {
-        v.transform = CGAffineTransformIdentity;             // drop temp transform
-        MKSaveOffset(CGPointMake(base.x + t.x, base.y + t.y)); // commit into persistent offset
-        [v.superview setNeedsLayout];                         // force setCenter: to re-run
+        platter.transform = CGAffineTransformIdentity;
+        MKSaveOffset(CGPointMake(base.x + t.x, base.y + t.y));
+        [container setNeedsLayout];
     }
 }
 - (void)handleReset:(UITapGestureRecognizer *)g {
-    UIView *v = g.view;
-    v.transform = CGAffineTransformIdentity;
+    UIView *container = g.view;
+    UIView *platter = MKFindPlatter(container) ?: container;
+    platter.transform = CGAffineTransformIdentity;
     MKSaveOffset(CGPointZero);
-    [v.superview setNeedsLayout];
+    [container setNeedsLayout];
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
     [fb impactOccurred];
 }
@@ -93,30 +108,29 @@ static void MKMark(NSString *key, id value) {
 }
 @end
 
-#pragma mark - the movable dock: SBFloatingDockView (iPad)
+#pragma mark - hooks
 
 @interface SBFloatingDockView : UIView
+@end
+@interface SBFloatingDockPlatterView : UIView
 @end
 
 %hook SBFloatingDockView
 
-- (void)setCenter:(CGPoint)center {
-    CGPoint o = MKLoadOffset();
-    %orig(CGPointMake(center.x + o.x, center.y + o.y));
-}
-
 - (void)didMoveToWindow {
     %orig;
-    if (self.window) {
-        [[MKDockMover shared] install:self];
-    }
+    if (self.window) [[MKDockMover shared] install:self];
 }
 
 - (void)layoutSubviews {
     %orig;
-    // ground-truth on-screen position (independent of transform/frame quirks)
-    CGRect win = [self convertRect:self.bounds toView:nil];
-    MKMark(@"winRect", NSStringFromCGRect(win));
+    CGPoint o = MKLoadOffset();
+    UIView *platter = MKFindPlatter(self);
+    if (platter) {
+        // %orig just re-centered the platter to its base; shift it by our offset.
+        platter.frame = CGRectOffset(platter.frame, o.x, o.y);
+        MKMark(@"platterWin", NSStringFromCGRect([platter convertRect:platter.bounds toView:nil]));
+    }
     NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
     [d setInteger:[d integerForKey:@"applyCount"] + 1 forKey:@"applyCount"];
     [d synchronize];
