@@ -157,6 +157,11 @@ static CGPoint MKClampOffset(UIView *container, UIView *platter, CGPoint o) {
     CGPoint o = MKClampOffset(self, platter, MKLiveOffset(self));
     MKSetLiveOffset(self, o); // remember the clamped value
     platter.frame = CGRectOffset(platter.frame, o.x, o.y);
+#ifdef DOCKMOVER_VERIFY
+    NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
+    [d setObject:NSStringFromCGRect([platter convertRect:platter.bounds toView:nil]) forKey:@"platterWin"];
+    [d synchronize];
+#endif
 }
 
 %end
