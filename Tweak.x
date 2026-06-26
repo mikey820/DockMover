@@ -9,7 +9,7 @@
 // always offset from the freshly-computed base, the offset is stable and never
 // compounds.
 //
-// Gestures (on the dock container):
+// Gestures (on the dock):
 //   • two-finger drag        -> move the dock anywhere on screen (persists)
 //   • two-finger triple-tap  -> reset to default position
 //
@@ -18,13 +18,12 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static char kInstalledKey;  // gestures already installed on this view
+static char kInstalledKey;  // gestures already installed on this container
+static char kLiveOffsetKey; // NSValue(CGPoint) offset currently being applied
 
 static NSString *const kSuite = @"com.mikey820.dockmover";
 static NSString *const kKeyX  = @"offX";
 static NSString *const kKeyY  = @"offY";
-
-#pragma mark - persistence + diagnostics
 
 static CGPoint MKLoadOffset(void) {
     NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
@@ -36,10 +35,16 @@ static void MKSaveOffset(CGPoint p) {
     [d setDouble:p.y forKey:kKeyY];
     [d synchronize];
 }
-static void MKMark(NSString *key, id value) {
-    NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
-    [d setObject:value forKey:key];
-    [d synchronize];
+
+static CGPoint MKLiveOffset(UIView *container) {
+    NSValue *v = objc_getAssociatedObject(container, &kLiveOffsetKey);
+    if (v) return [v CGPointValue];
+    CGPoint o = MKLoadOffset();
+    objc_setAssociatedObject(container, &kLiveOffsetKey, [NSValue valueWithCGPoint:o], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return o;
+}
+static void MKSetLiveOffset(UIView *container, CGPoint o) {
+    objc_setAssociatedObject(container, &kLiveOffsetKey, [NSValue valueWithCGPoint:o], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static UIView *MKFindPlatter(UIView *root) {
@@ -51,6 +56,26 @@ static UIView *MKFindPlatter(UIView *root) {
         if (found) return found;
     }
     return nil;
+}
+
+// Clamp the offset so the platter keeps at least this much on screen.
+static CGPoint MKClampOffset(UIView *container, UIView *platter, CGPoint o) {
+    UIWindow *win = container.window;
+    if (!win) return o;
+    // Called before the offset is applied, so this is the un-offset base rect.
+    CGRect base = [platter convertRect:platter.bounds toView:win];
+    CGRect screen = win.bounds;
+    const CGFloat margin = 60.0; // keep at least this many points visible
+    CGFloat baseX = base.origin.x;
+    CGFloat baseY = base.origin.y;
+    CGFloat w = base.size.width, h = base.size.height;
+    CGFloat minX = margin - (baseX + w);            // platter right edge >= margin
+    CGFloat maxX = (screen.size.width - margin) - baseX; // platter left edge <= screenW - margin
+    CGFloat minY = margin - (baseY + h);
+    CGFloat maxY = (screen.size.height - margin) - baseY;
+    o.x = MAX(minX, MIN(maxX, o.x));
+    o.y = MAX(minY, MIN(maxY, o.y));
+    return o;
 }
 
 #pragma mark - shared gesture handler (singleton target)
@@ -69,28 +94,33 @@ static UIView *MKFindPlatter(UIView *root) {
 - (void)handlePan:(UIPanGestureRecognizer *)g {
     UIView *container = g.view;
     if (!container) return;
-    UIView *platter = MKFindPlatter(container) ?: container;
-    CGPoint base = MKLoadOffset();
+    static CGPoint base;
     CGPoint t = [g translationInView:container];
     if (g.state == UIGestureRecognizerStateBegan) {
+        base = MKLoadOffset();
         UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
         [fb prepare]; [fb impactOccurred];
-    } else if (g.state == UIGestureRecognizerStateChanged) {
-        platter.transform = CGAffineTransformMakeTranslation(base.x + t.x, base.y + t.y); // live feedback
-    } else if (g.state == UIGestureRecognizerStateEnded ||
-               g.state == UIGestureRecognizerStateCancelled ||
-               g.state == UIGestureRecognizerStateFailed) {
-        platter.transform = CGAffineTransformIdentity;
-        MKSaveOffset(CGPointMake(base.x + t.x, base.y + t.y));
+    } else {
+        CGPoint o = CGPointMake(base.x + t.x, base.y + t.y);
+        MKSetLiveOffset(container, o);
         [container setNeedsLayout];
+        [container layoutIfNeeded];
+        if (g.state == UIGestureRecognizerStateEnded ||
+            g.state == UIGestureRecognizerStateCancelled ||
+            g.state == UIGestureRecognizerStateFailed) {
+            // persist the clamped value that layout actually settled on
+            MKSaveOffset(MKLiveOffset(container));
+        }
     }
 }
 - (void)handleReset:(UITapGestureRecognizer *)g {
     UIView *container = g.view;
-    UIView *platter = MKFindPlatter(container) ?: container;
-    platter.transform = CGAffineTransformIdentity;
+    MKSetLiveOffset(container, CGPointZero);
     MKSaveOffset(CGPointZero);
-    [container setNeedsLayout];
+    [UIView animateWithDuration:0.25 animations:^{
+        [container setNeedsLayout];
+        [container layoutIfNeeded];
+    }];
     UIImpactFeedbackGenerator *fb = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleHeavy];
     [fb impactOccurred];
 }
@@ -112,8 +142,6 @@ static UIView *MKFindPlatter(UIView *root) {
 
 @interface SBFloatingDockView : UIView
 @end
-@interface SBFloatingDockPlatterView : UIView
-@end
 
 %hook SBFloatingDockView
 
@@ -123,23 +151,12 @@ static UIView *MKFindPlatter(UIView *root) {
 }
 
 - (void)layoutSubviews {
-    %orig;
-    CGPoint o = MKLoadOffset();
+    %orig; // re-centers the platter at its base position
     UIView *platter = MKFindPlatter(self);
-    if (platter) {
-        // %orig just re-centered the platter to its base; shift it by our offset.
-        platter.frame = CGRectOffset(platter.frame, o.x, o.y);
-        MKMark(@"platterWin", NSStringFromCGRect([platter convertRect:platter.bounds toView:nil]));
-    }
-    NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
-    [d setInteger:[d integerForKey:@"applyCount"] + 1 forKey:@"applyCount"];
-    [d synchronize];
+    if (!platter) return;
+    CGPoint o = MKClampOffset(self, platter, MKLiveOffset(self));
+    MKSetLiveOffset(self, o); // remember the clamped value
+    platter.frame = CGRectOffset(platter.frame, o.x, o.y);
 }
 
 %end
-
-%ctor {
-    NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:kSuite];
-    [d setInteger:[d integerForKey:@"loadCount"] + 1 forKey:@"loadCount"];
-    [d synchronize];
-}
